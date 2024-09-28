@@ -8,7 +8,6 @@ const speech = require('@google-cloud/speech');
 const w2n = require('words-to-numbers');
 const OpenAI = require('openai');
 
-
 require('dotenv').config();
 
 const app = express();
@@ -36,17 +35,18 @@ const getPreRecordedAudio = (type) => {
         case 'instructions': return path.join(utilAudioDir, 'instructions.mp3');
         case 'no_input': return path.join(utilAudioDir, 'no_input.mp3');
         default: throw new Error('Invalid audio type');
-    }}
-
-    function checkAnswer(userAnswer, correctAnswer) {
-        let numericUserAnswer = parseInt(userAnswer, 10);
-    
-        if (isNaN(numericUserAnswer)) {
-            numericUserAnswer = w2n.wordsToNumbers(userAnswer) || textToNumber(userAnswer);
-        }
-    
-        return numericUserAnswer === correctAnswer;
     }
+}
+
+function checkAnswer(userAnswer, correctAnswer) {
+    let numericUserAnswer = parseInt(userAnswer, 10);
+
+    if (isNaN(numericUserAnswer)) {
+        numericUserAnswer = w2n.wordsToNumbers(userAnswer) || textToNumber(userAnswer);
+    }
+
+    return numericUserAnswer === correctAnswer;
+}
 
 const synthesizeSpeech = async (text) => {
     const outputDir = path.join(__dirname, 'audio', 'output');
@@ -71,20 +71,20 @@ const generateMathProblem = async (difficulty, gameMode) => {
     if (difficulty === 'easy') {
         prompt = `
             Generate a simple ${gameMode} problem with two single-digit numbers.
-            Present the problem in the format in words no symbols: "What is <problem>?". 
+            Present the problem in the format in words: "What is <problem>?". 
             Include the correct answer in this format at the end: "Answer: <answer>."
         `;
     } else if (difficulty === 'medium') {
         prompt = `
             Generate an medium ${gameMode} problem with two two-digit numbers.
-            Present the problem in the format in words no symbols: "What is <problem>?". 
+            Present the problem in the format in words: "What is <problem>?". 
             Include the correct answer in this format at the end: "Answer: <answer>."
         `;
     } else {
         prompt =
         `
             Generate an hard ${gameMode} problem with three two-digit numbers.
-            Present the problem in the format in words no symbols: "What is <problem>?". 
+            Present the problem in the format in words: "What is <problem>?". 
             Include the correct answer in this format at the end: "Answer: <answer>."
         `;
     }
@@ -134,13 +134,27 @@ const determineDifficulty = (accuracy) => {
     return 'easy';
 };
 
+function getCookies(req) {
+    const cookies = {};
+    req.headers.cookie?.split(';').forEach(cookie => {
+        const [name, value] = cookie.split('=').map(item => item.trim());
+        cookies[name] = decodeURIComponent(value);
+    });
+    return cookies;
+}
+
 app.get('/start-game/:gameMode', async (req, res) => {
     const gameMode = req.params.gameMode;
+    const cookies = getCookies(req);
+    
     if (!['addition', 'subtraction', 'multiplication', 'division'].includes(gameMode)) {
         return res.status(400).json({ error: 'Invalid game mode' });
     }
 
     try {
+        totalGamesPlayed = parseInt(cookies[`${gameMode}_totalGames`]) || totalGamesPlayed;
+        correctAnswers = parseInt(cookies[`${gameMode}_correctAnswers`]) || correctAnswers;
+
         const accuracy = (totalGamesPlayed === 0) ? 0 : (correctAnswers / totalGamesPlayed) * 100;
         const difficulty = determineDifficulty(accuracy);
         const { question, answer } = await generateMathProblem(difficulty, gameMode);
@@ -148,6 +162,7 @@ app.get('/start-game/:gameMode', async (req, res) => {
         const audioFilePath = await synthesizeSpeech(question);
         lastQuestionAudioFile = path.join(__dirname, 'audio', 'output', path.basename(audioFilePath));
         totalGamesPlayed++;
+        
         res.json({ question, answer, audioPath: audioFilePath });
     } catch (error) {
         console.error('Error during start game:', error);
@@ -211,15 +226,27 @@ app.get('/no-input-audio', (req, res) => {
 });
 
 app.get('/end-game', (req, res) => {
+    const gameMode = req.query.gameMode;
+    
+    totalGamesPlayed -= 1;
+
     const accuracy = ((correctAnswers / totalGamesPlayed) * 100).toFixed(2);
-    res.json({
+
+    const responseObject = {
         totalGamesPlayed,
         correctAnswers,
         accuracy
-    });
-    totalGamesPlayed = 0;
-    correctAnswers = 0;
+    };
+
+    if (gameMode && ['addition', 'subtraction', 'multiplication', 'division'].includes(gameMode)) {
+        res.cookie(`${gameMode}_totalGames`, totalGamesPlayed, { maxAge: 31536000, httpOnly: false, path: '/' });
+        res.cookie(`${gameMode}_correctAnswers`, correctAnswers, { maxAge: 31536000, httpOnly: false, path: '/' });
+        res.cookie(`${gameMode}_accuracy`, accuracy, { maxAge: 31536000, httpOnly: false, path: '/' });
+    }
+
+    res.json(responseObject);
 });
+
 
 app.get('/repeat-audio', (req, res) => {
     if (lastQuestionAudioFile) {
