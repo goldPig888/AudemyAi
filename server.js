@@ -1,14 +1,23 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const textToSpeech = require('@google-cloud/text-to-speech');
-const speech = require('@google-cloud/speech');
+const path = require('path');
 const fs = require('fs');
 const util = require('util');
-const path = require('path');
-const mathGame = require('./games/mathGame');
+const textToSpeech = require('@google-cloud/text-to-speech');
+const speech = require('@google-cloud/speech');
+const w2n = require('words-to-numbers');
+const OpenAI = require('openai');
+
+
+require('dotenv').config();
 
 const app = express();
 const port = 3000;
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const credentials = JSON.parse(fs.readFileSync('credentials.json'));
+const clientTTS = new textToSpeech.TextToSpeechClient({ credentials });
+const clientSTT = new speech.SpeechClient({ credentials });
 
 let totalGamesPlayed = 0;
 let correctAnswers = 0;
@@ -17,11 +26,6 @@ let lastFeedbackAudioFile = '';
 
 app.use(express.static('public'));
 app.use('/audio', express.static(path.join(__dirname, 'audio')));
-
-const credentials = JSON.parse(fs.readFileSync('credentials.json'));
-const clientTTS = new textToSpeech.TextToSpeechClient({ credentials });
-const clientSTT = new speech.SpeechClient({ credentials });
-
 app.use(bodyParser.json());
 
 const getPreRecordedAudio = (type) => {
@@ -32,8 +36,17 @@ const getPreRecordedAudio = (type) => {
         case 'instructions': return path.join(utilAudioDir, 'instructions.mp3');
         case 'no_input': return path.join(utilAudioDir, 'no_input.mp3');
         default: throw new Error('Invalid audio type');
+    }}
+
+    function checkAnswer(userAnswer, correctAnswer) {
+        let numericUserAnswer = parseInt(userAnswer, 10);
+    
+        if (isNaN(numericUserAnswer)) {
+            numericUserAnswer = w2n.wordsToNumbers(userAnswer) || textToNumber(userAnswer);
+        }
+    
+        return numericUserAnswer === correctAnswer;
     }
-};
 
 const synthesizeSpeech = async (text) => {
     const outputDir = path.join(__dirname, 'audio', 'output');
@@ -42,14 +55,59 @@ const synthesizeSpeech = async (text) => {
     const request = {
         input: { text },
         voice: { languageCode: 'en-US', ssmlGender: 'NEUTRAL' },
-        audioConfig: { audioEncoding: 'MP3' },
+        audioConfig: { audioEncoding: 'MP3' }
     };
+
     const [response] = await clientTTS.synthesizeSpeech(request);
     const audioFileName = `output_${Date.now()}.mp3`;
     const audioPath = path.join(outputDir, audioFileName);
-    const writeFile = util.promisify(fs.writeFile);
-    await writeFile(audioPath, response.audioContent, 'binary');
+    await util.promisify(fs.writeFile)(audioPath, response.audioContent, 'binary');
     return `/audio/output/${audioFileName}`;
+};
+
+const generateMathProblem = async (difficulty) => {
+    let prompt;
+
+    
+
+    if (difficulty === 'easy') {
+        prompt = `
+            Generate a simple addition problem with two single-digit numbers.
+            Present the problem in the format: "What is <problem>?". 
+            Include the correct answer in this format at the end: "Answer: <answer>."
+        `;
+    } else if (difficulty === 'medium') {
+        prompt = `
+            Generate an addition problem with two two-digit numbers.
+            Present the problem in the format: "What is <problem>?". 
+            Include the correct answer in this format at the end: "Answer: <answer>."
+        `;
+    } else {
+        prompt =
+        `
+            Generate an addition problem with three two-digit numbers.
+            Present the problem in the format: "What is <problem>?". 
+            Include the correct answer in this format at the end: "Answer: <answer>."
+        `;
+    }
+
+    const response = await openai.completions.create({
+        model: "gpt-3.5-turbo-instruct",
+        prompt: prompt,
+        max_tokens: 150,
+        temperature: 0.5
+    });
+
+    const generatedText = response.choices[0].text.trim();
+
+    const questionMatch = generatedText.match(/What is (.+?)\?/);
+    const answerMatch = generatedText.match(/Answer: (\d+)/);
+
+    if (!questionMatch || !answerMatch) {
+        throw new Error('Invalid GPT response format');
+    }
+
+    return { question: questionMatch[0], answer: parseInt(answerMatch[1], 10) };
 };
 
 const deleteOldAudioFiles = async () => {
@@ -59,7 +117,7 @@ const deleteOldAudioFiles = async () => {
             console.error('Error reading output directory:', err);
             return;
         }
-
+        
         files.forEach(file => {
             const filePath = path.join(outputDir, file);
             if (lastQuestionAudioFile !== filePath && lastFeedbackAudioFile !== filePath) {
@@ -70,18 +128,26 @@ const deleteOldAudioFiles = async () => {
             }
         });
     });
+}
+
+const determineDifficulty = (accuracy) => {
+    if (accuracy > 80) return 'hard';
+    if (accuracy > 50) return 'medium';
+    return 'easy';
 };
 
 app.get('/start-game', async (req, res) => {
     try {
-        const game = mathGame.start();
+        const accuracy = (totalGamesPlayed === 0) ? 0 : (correctAnswers / totalGamesPlayed) * 100;
+        const difficulty = determineDifficulty(accuracy);
+        const { question, answer } = await generateMathProblem(difficulty);
         await deleteOldAudioFiles();
-        const audioFilePath = await synthesizeSpeech(game.question);
-        console.log('Sending question with audio path:', audioFilePath);
-        lastQuestionAudioFile = path.join(__dirname, 'audio', 'output', audioFilePath.split('/').pop());
+        const audioFilePath = await synthesizeSpeech(question);
+        lastQuestionAudioFile = path.join(__dirname, 'audio', 'output', path.basename(audioFilePath));
         totalGamesPlayed++;
-        res.json({ question: game.question, answer: game.answer, audioPath: audioFilePath });
+        res.json({ question, answer, audioPath: audioFilePath });
     } catch (error) {
+        console.error('Error during start game:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -94,15 +160,10 @@ app.post('/submit-answer', async (req, res) => {
         }
 
         const userAnswer = audioBytes.trim();
-        const isCorrect = parseInt(userAnswer) === correctAnswer;
+        const isCorrect = checkAnswer(userAnswer, correctAnswer);
         const feedbackAudioPath = getPreRecordedAudio(isCorrect ? 'correct' : 'incorrect');
 
         if (isCorrect) correctAnswers++;
-
-        console.log(`Is the answer correct?: ${isCorrect}`);
-        console.log('Serving pre-recorded feedback audio:', feedbackAudioPath);
-
-        lastFeedbackAudioFile = feedbackAudioPath;
 
         const accuracy = ((correctAnswers / totalGamesPlayed) * 100).toFixed(2);
         res.json({
@@ -118,20 +179,11 @@ app.post('/submit-answer', async (req, res) => {
     }
 });
 
-app.get('/repeat-audio', (req, res) => {
-    if (lastQuestionAudioFile) {
-        const browserAccessiblePath = lastQuestionAudioFile.replace(path.join(__dirname, 'audio'), '/audio');
-        res.json({ audioPath: browserAccessiblePath });
-    } else {
-        res.status(404).json({ error: 'No audio available to repeat' });
-    }
-});
-
 app.post('/cleanup-audio-output', (req, res) => {
     const outputDir = path.join(__dirname, 'audio', 'output');
     fs.readdir(outputDir, (err, files) => {
         if (err) {
-            console.error('Error reading output directory:', err);
+            console.error(`Error reading output directory: ${err}`);
             return res.status(500).send('Error cleaning up files');
         }
 
@@ -163,6 +215,15 @@ app.get('/end-game', (req, res) => {
     });
     totalGamesPlayed = 0;
     correctAnswers = 0;
+});
+
+app.get('/repeat-audio', (req, res) => {
+    if (lastQuestionAudioFile) {
+        const browserAccessiblePath = lastQuestionAudioFile.replace(path.join(__dirname, 'audio'), '/audio');
+        res.json({ audioPath: browserAccessiblePath });
+    } else {
+        res.status(404).json({ error: 'No audio available to repeat' });
+    }
 });
 
 app.listen(port, () => {
