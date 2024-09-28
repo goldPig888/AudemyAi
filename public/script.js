@@ -6,6 +6,11 @@ let isPlayingFeedback = false;
 let isProcessingRound = false;
 let isGameRunning = false;
 
+document.addEventListener('DOMContentLoaded', function() {
+    gameMode = document.body.dataset.gameMode;
+    console.log("Current game mode:", gameMode);
+});
+
 document.getElementById('startGameBtn').addEventListener('click', () => {
     if (isGameRunning) {
         endGame();
@@ -28,10 +33,13 @@ async function startGameRound() {
         isGameRunning = true;
         startButton.textContent = 'End Game';
 
-        document.removeEventListener('keydown', handleKeyDown);
-        document.removeEventListener('keyup', handleKeyUp);
 
-        const response = await fetch('/start-game');
+        const gameMode = document.body.dataset.gameMode;
+        
+        const url = `/start-game/${gameMode}`;
+        console.log('Requesting game start for mode:', gameMode);
+
+        const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to start the game');
 
         const { question, answer, audioPath } = await response.json();
@@ -54,6 +62,7 @@ async function startGameRound() {
         alert('An error occurred, please try again.');
     }
 }
+
 
 function handleKeyDown(event) {
     if (event.code === 'Space' && !isRecognizing) {

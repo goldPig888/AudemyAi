@@ -65,28 +65,26 @@ const synthesizeSpeech = async (text) => {
     return `/audio/output/${audioFileName}`;
 };
 
-const generateMathProblem = async (difficulty) => {
+const generateMathProblem = async (difficulty, gameMode) => {
     let prompt;
-
-    
 
     if (difficulty === 'easy') {
         prompt = `
-            Generate a simple addition problem with two single-digit numbers.
-            Present the problem in the format: "What is <problem>?". 
+            Generate a simple ${gameMode} problem with two single-digit numbers.
+            Present the problem in the format in words no symbols: "What is <problem>?". 
             Include the correct answer in this format at the end: "Answer: <answer>."
         `;
     } else if (difficulty === 'medium') {
         prompt = `
-            Generate an addition problem with two two-digit numbers.
-            Present the problem in the format: "What is <problem>?". 
+            Generate an medium ${gameMode} problem with two two-digit numbers.
+            Present the problem in the format in words no symbols: "What is <problem>?". 
             Include the correct answer in this format at the end: "Answer: <answer>."
         `;
     } else {
         prompt =
         `
-            Generate an addition problem with three two-digit numbers.
-            Present the problem in the format: "What is <problem>?". 
+            Generate an hard ${gameMode} problem with three two-digit numbers.
+            Present the problem in the format in words no symbols: "What is <problem>?". 
             Include the correct answer in this format at the end: "Answer: <answer>."
         `;
     }
@@ -136,11 +134,16 @@ const determineDifficulty = (accuracy) => {
     return 'easy';
 };
 
-app.get('/start-game', async (req, res) => {
+app.get('/start-game/:gameMode', async (req, res) => {
+    const gameMode = req.params.gameMode;
+    if (!['addition', 'subtraction', 'multiplication', 'division'].includes(gameMode)) {
+        return res.status(400).json({ error: 'Invalid game mode' });
+    }
+
     try {
         const accuracy = (totalGamesPlayed === 0) ? 0 : (correctAnswers / totalGamesPlayed) * 100;
         const difficulty = determineDifficulty(accuracy);
-        const { question, answer } = await generateMathProblem(difficulty);
+        const { question, answer } = await generateMathProblem(difficulty, gameMode);
         await deleteOldAudioFiles();
         const audioFilePath = await synthesizeSpeech(question);
         lastQuestionAudioFile = path.join(__dirname, 'audio', 'output', path.basename(audioFilePath));
@@ -151,6 +154,7 @@ app.get('/start-game', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
 
 app.post('/submit-answer', async (req, res) => {
     try {
