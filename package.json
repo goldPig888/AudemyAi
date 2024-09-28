@@ -1,0 +1,10 @@
+{
+  "name": "audemy_ai_may",
+  "version": "1.0.0",
+  "dependencies": {
+    "@google-cloud/speech": "^6.7.0",
+    "@google-cloud/text-to-speech": "^5.4.0",
+    "body-parser": "^1.20.3",
+    "express": "^4.21.0"
+  }
+}
