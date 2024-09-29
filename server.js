@@ -42,7 +42,7 @@ function checkAnswer(userAnswer, correctAnswer) {
     let numericUserAnswer = parseInt(userAnswer, 10);
 
     if (isNaN(numericUserAnswer)) {
-        numericUserAnswer = w2n.wordsToNumbers(userAnswer) || textToNumber(userAnswer);
+        numericUserAnswer = w2n.wordsToNumbers(userAnswer);
     }
 
     return numericUserAnswer === correctAnswer;
@@ -184,7 +184,10 @@ app.post('/submit-answer', async (req, res) => {
 
         if (isCorrect) correctAnswers++;
 
-        const accuracy = ((correctAnswers / totalGamesPlayed) * 100).toFixed(2);
+        const accuracy = (totalGamesPlayed > 0) 
+            ? ((correctAnswers / totalGamesPlayed) * 100).toFixed(2) 
+            : 50;
+
         res.json({
             feedback: isCorrect ? "That's correct!" : "That's incorrect!",
             feedbackAudioPath: `/audio/util/${path.basename(feedbackAudioPath)}`,
@@ -197,6 +200,7 @@ app.post('/submit-answer', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
 
 app.post('/cleanup-audio-output', (req, res) => {
     const outputDir = path.join(__dirname, 'audio', 'output');
