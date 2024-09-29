@@ -224,13 +224,12 @@ function endGame() {
         .then(response => response.json())
         .then(data => {
             console.log('Game ended. Results:', data);
-            alert(`Game over! Total games played: ${data.totalGamesPlayed}, Correct answers: ${data.correctAnswers}, Accuracy: ${data.accuracy}%`);
+            //alert(`Game over! Total games played: ${data.totalGamesPlayed}, Correct answers: ${data.correctAnswers}, Accuracy: ${data.accuracy}%`);
 
             saveGameStatsToCookies(data);
         })
         .catch(error => {
             console.error('Error ending the game:', error);
-            alert('An error occurred while ending the game.');
         });
 }
 
