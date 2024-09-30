@@ -243,8 +243,6 @@ app.get('/no-input-audio', (req, res) => {
 
 app.get('/end-game', (req, res) => {
     const gameMode = req.query.gameMode;
-    
-    totalGamesPlayed -= 1;
 
     const accuracy = ((correctAnswers / totalGamesPlayed) * 100).toFixed(2);
 
