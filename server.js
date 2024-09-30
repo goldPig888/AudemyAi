@@ -146,7 +146,7 @@ function getCookies(req) {
 app.get('/start-game/:gameMode', async (req, res) => {
     const gameMode = req.params.gameMode;
     const cookies = getCookies(req);
-    
+
     if (!['addition', 'subtraction', 'multiplication', 'division'].includes(gameMode)) {
         return res.status(400).json({ error: 'Invalid game mode' });
     }
@@ -155,13 +155,16 @@ app.get('/start-game/:gameMode', async (req, res) => {
         totalGamesPlayed = parseInt(cookies[`${gameMode}_totalGames`]) || totalGamesPlayed;
         correctAnswers = parseInt(cookies[`${gameMode}_correctAnswers`]) || correctAnswers;
 
-        const accuracy = (totalGamesPlayed === 0) ? 0 : (correctAnswers / totalGamesPlayed) * 100;
+        const accuracy = (totalGamesPlayed === 0) ? 50 : ((correctAnswers / totalGamesPlayed) * 100).toFixed(2);
         const difficulty = determineDifficulty(accuracy);
+
         const { question, answer } = await generateMathProblem(difficulty, gameMode);
         await deleteOldAudioFiles();
         const audioFilePath = await synthesizeSpeech(question);
+
         lastQuestionAudioFile = path.join(__dirname, 'audio', 'output', path.basename(audioFilePath));
-        totalGamesPlayed++;
+
+        res.cookie('currentRoundCounted', false, { maxAge: 3600000, path: '/' });
         
         res.json({ question, answer, audioPath: audioFilePath });
     } catch (error) {
@@ -171,9 +174,12 @@ app.get('/start-game/:gameMode', async (req, res) => {
 });
 
 
+
 app.post('/submit-answer', async (req, res) => {
     try {
-        const { audioBytes, correctAnswer } = req.body;
+        const { audioBytes, correctAnswer, gameMode } = req.body;
+        const cookies = getCookies(req);
+
         if (!audioBytes || audioBytes.trim() === '') {
             throw new Error('Invalid or empty user answer');
         }
@@ -182,11 +188,16 @@ app.post('/submit-answer', async (req, res) => {
         const isCorrect = checkAnswer(userAnswer, correctAnswer);
         const feedbackAudioPath = getPreRecordedAudio(isCorrect ? 'correct' : 'incorrect');
 
+        let currentRoundCounted = cookies['currentRoundCounted'] === 'true';
+
+        if (!currentRoundCounted) {
+            totalGamesPlayed++;
+            res.cookie('currentRoundCounted', true, { maxAge: 3600000, path: '/' });
+        }
+
         if (isCorrect) correctAnswers++;
 
-        const accuracy = (totalGamesPlayed > 0) 
-            ? ((correctAnswers / totalGamesPlayed) * 100).toFixed(2) 
-            : 50;
+        const accuracy = (totalGamesPlayed > 0) ? ((correctAnswers / totalGamesPlayed) * 100).toFixed(2) : 50;
 
         res.json({
             feedback: isCorrect ? "That's correct!" : "That's incorrect!",
@@ -200,6 +211,7 @@ app.post('/submit-answer', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
 
 
 app.post('/cleanup-audio-output', (req, res) => {
