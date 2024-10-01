@@ -1,14 +1,13 @@
-let recognition;
 let isRecognizing = false;
+let isGameRunning = false;
+let isProcessingRound = false;
+let isPlayingFeedback = false;
 let lastAudioPath = '';
 let currentAnswer = null;
-let isPlayingFeedback = false;
-let isProcessingRound = false;
-let isGameRunning = false;
-let gameMode = '';
-
 let totalGamesPlayed = 0;
 let correctAnswers = 0;
+let recognition = null;
+let gameMode = '';
 
 document.addEventListener('DOMContentLoaded', function () {
     gameMode = document.body.dataset.gameMode;
@@ -148,6 +147,10 @@ async function stopSpeechRecognition() {
         console.log(`Total Games Played: ${totalGamesPlayed}`);
         console.log(`Correct Answers: ${correctAnswers}`);
 
+        if (feedback === "You should spell the word, not say it out loud.") {
+            alert(feedback);
+        }
+
         isPlayingFeedback = true;
         lastAudioPath = feedbackAudioPath;
         const audioPlayer = document.getElementById('audioPlayer');
@@ -166,6 +169,9 @@ async function stopSpeechRecognition() {
         console.error('Error submitting answer:', error);
     }
 }
+
+
+
 
 function retryRound() {
     console.log('Retrying round. Waiting for valid input...');
@@ -225,7 +231,7 @@ function endGame() {
         .then(response => response.json())
         .then(data => {
             console.log('Game ended. Results:', data);
-            //alert(`Game over! Total games played: ${data.totalGamesPlayed}, Correct answers: ${data.correctAnswers}, Accuracy: ${data.accuracy}%`);
+            // Optionally, display results to the user
 
             saveGameStatsToCookies(data);
         })
